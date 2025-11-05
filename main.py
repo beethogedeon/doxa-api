@@ -3,7 +3,7 @@ from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
 import numpy as np
-from speechbrain.inference import EncoderASR
+from speechbrain.pretrained import EncoderASR
 from transformers import pipeline
 import io
 import tempfile
