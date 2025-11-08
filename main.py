@@ -3,7 +3,7 @@ from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
 import numpy as np
-from speechbrain.pretrained import EncoderASR
+from speechbrain.inference import EncoderASR
 from transformers import pipeline
 import io
 import tempfile
@@ -47,6 +47,8 @@ def get_tts_pipe_fon():
         )
     return tts_pipe_fon
 
+speechbrain_model = get_speechbrain_model()
+
 @app.post("/transcribe")
 async def transcribe(audio: UploadFile = File(...)):
     """
@@ -61,9 +63,7 @@ async def transcribe(audio: UploadFile = File(...)):
             tmp_path = tmp_file.name
         
         try:
-            # Charger le modèle et transcrire
-            model = get_speechbrain_model()
-            transcription = model.transcribe_file(tmp_path)
+            transcription = speechbrain_model.transcribe_file(tmp_path)
             
             return {"transcription": transcription}
         finally:
