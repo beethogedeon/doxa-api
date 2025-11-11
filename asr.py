@@ -4,14 +4,14 @@ from speechbrain.inference import EncoderASR
 
 def get_speechbrain_model():
     """Charge le modèle SpeechBrain de manière lazy"""
-    global speechbrain_model
-    if speechbrain_model is None:
-        speechbrain_model = EncoderASR.from_hparams(
+    global fon_asr_model
+    if fon_asr_model is None:
+        fon_asr_model = EncoderASR.from_hparams(
             source="speechbrain/asr-wav2vec2-dvoice-fongbe",
             savedir="pretrained_models/asr-wav2vec2-dvoice-fongbe",
             run_opts={"device": "cuda:0"}
         )
-    return speechbrain_model
+    return fon_asr_model
 
 fon_asr_model = get_speechbrain_model()
 
