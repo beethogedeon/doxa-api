@@ -1,5 +1,6 @@
 import whisper
 from speechbrain.inference import EncoderASR
+from torch import cuda
 
 
 def get_speechbrain_model():
@@ -8,14 +9,14 @@ def get_speechbrain_model():
     fon_asr_model = EncoderASR.from_hparams(
         source="speechbrain/asr-wav2vec2-dvoice-fongbe",
         savedir="pretrained_models/asr-wav2vec2-dvoice-fongbe",
-        run_opts={"device": "cuda:0"}
+        run_opts={"device": "cuda" if cuda.is_available() else "cpu"}
     )
-    
+
     return fon_asr_model
 
 fon_asr_model = get_speechbrain_model()
 
-model = whisper.load_model("turbo")
+model = whisper.load_model("small",device="cuda" if cuda.is_available() else "cpu")
 
 def detect_language(audio_path: str):
 

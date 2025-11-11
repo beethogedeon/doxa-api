@@ -30,7 +30,7 @@ yor_tokenizer = AutoTokenizer.from_pretrained(
 )
 
 ckpt_converter = './checkpoints_v2/converter'
-device = "cuda:0" if torch.cuda.is_available() else "cpu"
+device = "cuda" if torch.cuda.is_available() else "cpu"
 output_dir = 'outputs_v2'
 
 
