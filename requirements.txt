@@ -19,3 +19,4 @@ eng_to_ipa
 pypinyin
 cn2an
 wavmark
+logging

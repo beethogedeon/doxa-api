@@ -11,6 +11,14 @@ import tempfile
 import os
 from .translate_ai import translate_and_ask_ai
 from .tts import generate_speech
+import logging
+
+# Configure the basic logging setup
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Get a logger instance
+logger = logging.getLogger(__name__)
+
 
 app = FastAPI(title="Doxa API", description="API pour transcription et synthèse vocale")
 
