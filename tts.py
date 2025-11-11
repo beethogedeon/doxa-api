@@ -1,11 +1,19 @@
 import tensorflow
 import torch
 import numpy as np
-import logger
+import logging
 import soundfile as sf
 import os
 from openvoice import se_extractor
 from openvoice.api import ToneColorConverter
+
+
+# Configure the basic logging setup
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Get a logger instance
+logger = logging.getLogger(__name__)
+
 
 
 # Use a pipeline as a high-level helper
