@@ -4,13 +4,13 @@ from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
 import numpy as np
 from speechbrain.inference import EncoderASR
-from doxa_api.asr import transcribe
+from .asr import transcribe
 from transformers import pipeline
 import io
 import tempfile
 import os
-from doxa_api.translate_ai import translate_and_ask_ai
-from doxa_api.tts import generate_speech
+from .translate_ai import translate_and_ask_ai
+from .tts import generate_speech
 
 app = FastAPI(title="Doxa API", description="API pour transcription et synthèse vocale")
 
