@@ -32,7 +32,7 @@ pretrained_models/
 # Fichiers temporaires
 *.tmp
 *.temp
-*.wav
+#*.wav
 *.mp3
 
 # IDE
