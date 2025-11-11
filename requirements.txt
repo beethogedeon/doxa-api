@@ -20,3 +20,4 @@ pypinyin
 cn2an
 wavmark
 logging
+uvicorn

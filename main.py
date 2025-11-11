@@ -12,6 +12,7 @@ import os
 from .translate_ai import translate_and_ask_ai
 from .tts import generate_speech
 import logging
+import uvicorn
 
 # Configure the basic logging setup
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -82,3 +83,8 @@ async def transcribe_endpoint(audio: UploadFile = File(...)):
 @app.get("/")
 async def root():
     return {"message": "Doxa API - Transcription et synthèse vocale"}
+
+
+
+if __name__ == "__main__":
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
