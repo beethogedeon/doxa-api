@@ -9,3 +9,13 @@ torch
 torchaudio
 librosa
 soundfile
+pyngrok
+git+https://github.com/beethogedeon/deep-translator
+openai-whisper==20250625
+faster-whisper
+whisper-timestamped
+unidecode
+eng_to_ipa
+pypinyin
+cn2an
+wavmark
