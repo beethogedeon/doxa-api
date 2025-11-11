@@ -29,7 +29,7 @@ yor_tokenizer = AutoTokenizer.from_pretrained(
     "facebook/mms-tts-yor"
 )
 
-ckpt_converter = 'checkpoints_v2/converter'
+ckpt_converter = './checkpoints_v2/converter'
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
 output_dir = 'outputs_v2'
 
@@ -40,7 +40,7 @@ tone_color_converter = ToneColorConverter(f'{ckpt_converter}/config.json', devic
 tone_color_converter.load_ckpt(f'{ckpt_converter}/checkpoint.pth')
 
 
-reference_speaker = 'consolas_voice.wav' # This is the voice you want to clone
+reference_speaker = './consolas_voice.wav' # This is the voice you want to clone
 target_se, audio_name = se_extractor.get_se(reference_speaker, tone_color_converter, vad=True)
 
 
