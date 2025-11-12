@@ -89,10 +89,6 @@ def ask_ai(text: str):
         api_call_start = time.time()
         
         completion = client.chat.completions.create(
-            # extra_headers={
-            #     "HTTP-Referer": "<YOUR_SITE_URL>",
-            #     "X-Title": "<YOUR_SITE_NAME>",
-            # },
             model="gpt-5-mini",
             messages=[
                 {

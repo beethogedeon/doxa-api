@@ -14,7 +14,10 @@ from .tts import generate_speech
 import logging
 import uvicorn
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
+import random
+import asyncio
+from pathlib import Path
 
 # Configuration du logging avec rotation de fichiers
 from logging.handlers import RotatingFileHandler
@@ -62,11 +65,80 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Dictionnaire pour suivre les fichiers audio utilisés récemment
+# Structure: {filename: datetime_last_used}
+recently_used_audios = {}
+
+# Dossier contenant les fichiers audio
+AUDIO_FOLDER = "/kaggle/working/doxa-api/audios"
+
+def get_available_audio_files():
+    """
+    Récupère tous les fichiers audio .wav du dossier audio.
+    """
+    audio_path = Path(AUDIO_FOLDER)
+    if not audio_path.exists():
+        logger.error(f"Le dossier {AUDIO_FOLDER} n'existe pas")
+        return []
+    
+    wav_files = list(audio_path.glob("*.wav"))
+    logger.info(f"Fichiers audio trouvés: {len(wav_files)}")
+    return wav_files
+
+def clean_recent_audios():
+    """
+    Nettoie les entrées du dictionnaire qui ont plus de 20 minutes.
+    """
+    current_time = datetime.now()
+    expired_files = []
+    
+    for filename, last_used in list(recently_used_audios.items()):
+        if current_time - last_used > timedelta(minutes=20):
+            expired_files.append(filename)
+            del recently_used_audios[filename]
+    
+    if expired_files:
+        logger.info(f"Nettoyage: {len(expired_files)} fichier(s) peuvent être réutilisés")
+
+def select_random_audio():
+    """
+    Sélectionne aléatoirement un fichier audio qui n'a pas été utilisé dans les 20 dernières minutes.
+    """
+    # Nettoyer les anciennes entrées
+    clean_recent_audios()
+    
+    # Récupérer tous les fichiers disponibles
+    all_files = get_available_audio_files()
+    
+    if not all_files:
+        raise HTTPException(status_code=500, detail="Aucun fichier audio trouvé dans le dossier 'audio'")
+    
+    # Filtrer les fichiers qui n'ont pas été utilisés récemment
+    available_files = [f for f in all_files if f.name not in recently_used_audios]
+    
+    # Si tous les fichiers ont été utilisés récemment, utiliser le plus ancien
+    if not available_files:
+        logger.warning("Tous les fichiers ont été utilisés récemment, sélection du plus ancien")
+        oldest_file = min(recently_used_audios.items(), key=lambda x: x[1])
+        selected_file = Path(AUDIO_FOLDER) / oldest_file[0]
+    else:
+        # Sélectionner aléatoirement parmi les fichiers disponibles
+        selected_file = random.choice(available_files)
+    
+    # Marquer le fichier comme utilisé
+    recently_used_audios[selected_file.name] = datetime.now()
+    
+    logger.info(f"Fichier sélectionné: {selected_file.name}")
+    logger.info(f"Fichiers utilisés récemment: {len(recently_used_audios)}/{len(all_files)}")
+    
+    return selected_file
+
 @app.post("/transcribe")
 async def transcribe_endpoint(audio: UploadFile = File(...)):
     """
     Endpoint pour transcrire un fichier audio.
-    Reçoit un fichier audio et retourne la transcription en audio.
+    Après un délai aléatoire entre 3 et 6 secondes, retourne un fichier audio aléatoire
+    du dossier 'audio', en évitant les fichiers utilisés dans les 20 dernières minutes.
     """
     # Timestamp de début
     request_start = time.time()
@@ -76,72 +148,41 @@ async def transcribe_endpoint(audio: UploadFile = File(...)):
     logger.info(f"[REQUEST {request_id}] Nouvelle requête de transcription reçue")
     logger.info(f"[REQUEST {request_id}] Fichier: {audio.filename}, Type: {audio.content_type}")
     
-    tmp_input_path = None
-    tmp_output_path = None
-    
     try:
-        # ÉTAPE 1: Sauvegarde du fichier audio
+        # ÉTAPE 1: Réception du fichier (on le lit mais on ne l'utilise pas)
         step_start = time.time()
-        logger.info(f"[REQUEST {request_id}] ÉTAPE 1/4: Sauvegarde du fichier audio...")
+        logger.info(f"[REQUEST {request_id}] ÉTAPE 1/3: Réception du fichier audio...")
         
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_input:
-            content = await audio.read()
-            file_size = len(content) / 1024  # Taille en KB
-            tmp_input.write(content)
-            tmp_input_path = tmp_input.name
+        content = await audio.read()
+        file_size = len(content) / 1024  # Taille en KB
         
         step_duration = time.time() - step_start
         logger.info(f"[REQUEST {request_id}] ✓ ÉTAPE 1 terminée en {step_duration:.2f}s - Taille: {file_size:.2f} KB")
-        logger.info(f"[REQUEST {request_id}] Fichier temporaire créé: {tmp_input_path}")
         
-        # ÉTAPE 2: Création du fichier de sortie
+        # ÉTAPE 2: Délai aléatoire entre 3 et 6 secondes
+        delay = random.uniform(3, 6)
+        logger.info(f"[REQUEST {request_id}] ÉTAPE 2/3: Attente de {delay:.2f} secondes...")
+        
+        await asyncio.sleep(delay)
+        
+        logger.info(f"[REQUEST {request_id}] ✓ ÉTAPE 2 terminée")
+        
+        # ÉTAPE 3: Sélection et envoi d'un fichier audio aléatoire
         step_start = time.time()
-        logger.info(f"[REQUEST {request_id}] ÉTAPE 2/4: Création du fichier de sortie...")
+        logger.info(f"[REQUEST {request_id}] ÉTAPE 3/3: Sélection d'un fichier audio aléatoire...")
         
-        tmp_output_fd, tmp_output_path = tempfile.mkstemp(suffix=".wav")
-        os.close(tmp_output_fd)
-        
-        step_duration = time.time() - step_start
-        logger.info(f"[REQUEST {request_id}] ✓ ÉTAPE 2 terminée en {step_duration:.2f}s")
-        logger.info(f"[REQUEST {request_id}] Fichier de sortie: {tmp_output_path}")
-        
-        # ÉTAPE 3: Transcription de l'audio
-        step_start = time.time()
-        logger.info(f"[REQUEST {request_id}] ÉTAPE 3/4: Transcription de l'audio...")
-        
-        transcription, lang = transcribe(tmp_input_path)
+        selected_audio = select_random_audio()
         
         step_duration = time.time() - step_start
         logger.info(f"[REQUEST {request_id}] ✓ ÉTAPE 3 terminée en {step_duration:.2f}s")
-        logger.info(f"[REQUEST {request_id}] Langue détectée: {lang}")
-        logger.info(f"[REQUEST {request_id}] Transcription: {transcription[:100]}..." if len(transcription) > 100 else f"[REQUEST {request_id}] Transcription: {transcription}")
         
-        # ÉTAPE 3.1: Traduction et réponse IA
-        step_start = time.time()
-        logger.info(f"[REQUEST {request_id}] ÉTAPE 3.1/4: Traduction et génération de réponse IA...")
-        
-        ai_response = translate_and_ask_ai(transcription, output_language=lang)
-        
-        step_duration = time.time() - step_start
-        logger.info(f"[REQUEST {request_id}] ✓ ÉTAPE 3.1 terminée en {step_duration:.2f}s")
-        logger.info(f"[REQUEST {request_id}] Réponse IA: {ai_response[:100]}..." if len(ai_response) > 100 else f"[REQUEST {request_id}] Réponse IA: {ai_response}")
-        
-        # ÉTAPE 4: Génération de la synthèse vocale
-        step_start = time.time()
-        logger.info(f"[REQUEST {request_id}] ÉTAPE 4/4: Génération de la synthèse vocale...")
-        
-        generate_speech(ai_response, lang, tmp_input_path, tmp_output_path)
-        
-        step_duration = time.time() - step_start
-        logger.info(f"[REQUEST {request_id}] ✓ ÉTAPE 4 terminée en {step_duration:.2f}s")
-        
-        # Lecture et envoi du fichier audio
-        logger.info(f"[REQUEST {request_id}] Lecture du fichier audio généré...")
-        with open(tmp_output_path, "rb") as f:
+        # Lecture du fichier audio sélectionné
+        logger.info(f"[REQUEST {request_id}] Lecture du fichier: {selected_audio}")
+        with open(selected_audio, "rb") as f:
             audio_content = f.read()
         
         output_size = len(audio_content) / 1024  # Taille en KB
-        logger.info(f"[REQUEST {request_id}] Taille du fichier de sortie: {output_size:.2f} KB")
+        logger.info(f"[REQUEST {request_id}] Taille du fichier: {output_size:.2f} KB")
         
         # Durée totale
         total_duration = time.time() - request_start
@@ -153,8 +194,9 @@ async def transcribe_endpoint(audio: UploadFile = File(...)):
             content=audio_content,
             media_type="audio/wav",
             headers={
-                "Content-Disposition": "attachment; filename=response.wav",
-                "X-Request-Duration": f"{total_duration:.2f}s"
+                "Content-Disposition": f"attachment; filename={selected_audio.name}",
+                "X-Request-Duration": f"{total_duration:.2f}s",
+                "X-Selected-Audio": selected_audio.name
             }
         )
     
@@ -166,26 +208,43 @@ async def transcribe_endpoint(audio: UploadFile = File(...)):
         logger.info(f"=" * 80)
         
         raise HTTPException(status_code=500, detail=f"Erreur lors de l'API: {str(e)}")
-    
-    finally:
-        # Nettoyer les fichiers temporaires
-        logger.info(f"[REQUEST {request_id}] Nettoyage des fichiers temporaires...")
-        if tmp_input_path and os.path.exists(tmp_input_path):
-            os.unlink(tmp_input_path)
-            logger.info(f"[REQUEST {request_id}] Fichier d'entrée supprimé: {tmp_input_path}")
-        if tmp_output_path and os.path.exists(tmp_output_path):
-            os.unlink(tmp_output_path)
-            logger.info(f"[REQUEST {request_id}] Fichier de sortie supprimé: {tmp_output_path}")
 
 @app.get("/")
 async def root():
     logger.info("Accès à la route racine")
     return {"message": "Doxa API - Transcription et synthèse vocale"}
 
+@app.get("/audio-stats")
+async def audio_stats():
+    """
+    Endpoint pour obtenir des statistiques sur les fichiers audio.
+    """
+    clean_recent_audios()
+    all_files = get_available_audio_files()
+    
+    return {
+        "total_audio_files": len(all_files),
+        "recently_used": len(recently_used_audios),
+        "available_now": len(all_files) - len(recently_used_audios),
+        "recent_files": list(recently_used_audios.keys())
+    }
+
 @app.on_event("startup")
 async def startup_event():
     logger.info("=" * 80)
     logger.info("🚀 Démarrage de l'application Doxa API")
+    
+    # Vérifier que le dossier audio existe
+    if not os.path.exists(AUDIO_FOLDER):
+        logger.warning(f"⚠️ Le dossier '{AUDIO_FOLDER}' n'existe pas. Création...")
+        os.makedirs(AUDIO_FOLDER)
+    
+    # Lister les fichiers audio disponibles
+    audio_files = get_available_audio_files()
+    logger.info(f"📁 Fichiers audio disponibles: {len(audio_files)}")
+    for audio_file in audio_files:
+        logger.info(f"   - {audio_file.name}")
+    
     logger.info("=" * 80)
 
 @app.on_event("shutdown")
