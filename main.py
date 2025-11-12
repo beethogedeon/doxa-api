@@ -4,13 +4,13 @@ from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
 import numpy as np
 from speechbrain.inference import EncoderASR
-from .asr import transcribe
+#from .asr import transcribe
 from transformers import pipeline
 import io
 import tempfile
 import os
-from .translate_ai import translate_and_ask_ai
-from .tts import generate_speech
+#from .translate_ai import translate_and_ask_ai
+#from .tts import generate_speech
 import logging
 import uvicorn
 import time
