@@ -48,7 +48,7 @@ logger.info("=" * 80)
 logger.info("Chargement du modèle TTS Fongbe...")
 fon_start = time.time()
 try:
-    fon_tts = VitsModel.from_pretrained("facebook/mms-tts-fon", device="cuda" if cuda.is_available() else "cpu")
+    fon_tts = VitsModel.from_pretrained("facebook/mms-tts-fon")
     fon_tokenizer = AutoTokenizer.from_pretrained("facebook/mms-tts-fon")
     fon_duration = time.time() - fon_start
     logger.info(f"✓ Modèle TTS Fongbe chargé avec succès en {fon_duration:.2f}s")
@@ -60,7 +60,7 @@ except Exception as e:
 logger.info("Chargement du modèle TTS Yoruba...")
 yor_start = time.time()
 try:
-    yor_tts = VitsModel.from_pretrained("facebook/mms-tts-yor", device="cuda" if cuda.is_available() else "cpu")
+    yor_tts = VitsModel.from_pretrained("facebook/mms-tts-yor",)
     yor_tokenizer = AutoTokenizer.from_pretrained("facebook/mms-tts-yor")
     yor_duration = time.time() - yor_start
     logger.info(f"✓ Modèle TTS Yoruba chargé avec succès en {yor_duration:.2f}s")
