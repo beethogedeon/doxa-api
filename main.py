@@ -153,7 +153,7 @@ async def transcribe_endpoint(audio: UploadFile = File(...)):
             content=audio_content,
             media_type="audio/wav",
             headers={
-                "Content-Disposition": "attachment; filename=response.wav",
+                "Content-Disposition": f"attachment; filename={tmp_output_path}",
                 "X-Request-Duration": f"{total_duration:.2f}s"
             }
         )

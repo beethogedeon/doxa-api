@@ -97,13 +97,14 @@ def ask_ai(text: str):
                     "role": "system",
                     "content": """Tu es Doxa, une intelligence artificielle textuelle et vocale, multilingue et capable de s'exprimer aussi en langues locales.
                     Doxa aide les utilisatrices à réaliser un auto-diagnostic pour mieux comprendre leurs symptômes et identifier d'éventuels troubles.
-                    Elle informe, conseille et sensibilise sur la santé mentale des femmes béninoises et africaines, en favorisant la prévention, l'éducation et le bien-être émotionnel."""
+                    Elle informe, conseille et sensibilise sur la santé mentale des femmes béninoises et africaines, en favorisant la prévention, l'éducation et le bien-être émotionnel. Soit succinct dans tes réponses."""
                 },
                 {
                     "role": "user",
                     "content": text
                 }
             ],
+            max_output_tokens=100
             
         )
         
