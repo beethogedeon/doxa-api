@@ -89,23 +89,22 @@ def ask_ai(text: str):
         api_call_start = time.time()
         
         completion = client.chat.completions.create(
-            # extra_headers={
-            #     "HTTP-Referer": "<YOUR_SITE_URL>",
-            #     "X-Title": "<YOUR_SITE_NAME>",
-            # },
-            model="gpt-5-mini",
+            model="gpt-5-nano-2025-08-07",
+            reasoning_effort= "none",
+            verbosity = "low",
             messages=[
                 {
                     "role": "system",
                     "content": """Tu es Doxa, une intelligence artificielle textuelle et vocale, multilingue et capable de s'exprimer aussi en langues locales.
-Doxa aide les utilisatrices à réaliser un auto-diagnostic pour mieux comprendre leurs symptômes et identifier d'éventuels troubles.
-Elle informe, conseille et sensibilise sur la santé mentale des femmes béninoises et africaines, en favorisant la prévention, l'éducation et le bien-être émotionnel."""
+                    Doxa aide les utilisatrices à réaliser un auto-diagnostic pour mieux comprendre leurs symptômes et identifier d'éventuels troubles.
+                    Elle informe, conseille et sensibilise sur la santé mentale des femmes béninoises et africaines, en favorisant la prévention, l'éducation et le bien-être émotionnel."""
                 },
                 {
                     "role": "user",
                     "content": text
                 }
-            ]
+            ],
+            
         )
         
         api_call_duration = time.time() - api_call_start

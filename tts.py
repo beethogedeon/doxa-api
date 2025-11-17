@@ -36,7 +36,7 @@ console_handler.setFormatter(log_format)
 logger.addHandler(file_handler)
 logger.addHandler(console_handler)
 
-# Use a pipeline as a high-level helper
+
 from transformers import VitsModel, AutoTokenizer
 
 logger.info("=" * 80)
@@ -206,6 +206,7 @@ def generate_speech(text: str, lang: str, input_audio_path: str, output_audio_pa
             # Tokenization
             token_start = time.time()
             logger.info("Tokenization du texte...")
+            logger.info(text)
             inputs = fon_tokenizer(text, return_tensors="pt")
             sampling_rate = fon_tts.config.sampling_rate
             token_duration = time.time() - token_start
