@@ -89,9 +89,9 @@ def ask_ai(text: str):
         api_call_start = time.time()
         
         completion = client.chat.completions.create(
-            model="gpt-5.1",
-            reasoning_effort= "none",
-            verbosity = "low",
+            model="gpt-4.1-mini-2025-04-14",
+            #reasoning_effort= "none",
+            #verbosity = "low",
             messages=[
                 {
                     "role": "system",
@@ -104,7 +104,7 @@ def ask_ai(text: str):
                     "content": text
                 }
             ],
-            max_output_tokens=100
+            max_completion_tokens=100
             
         )
         
