@@ -1,5 +1,5 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
 import numpy as np
@@ -9,8 +9,8 @@ from transformers import pipeline
 import io
 import tempfile
 import os
-from .translate_ai import translate_and_ask_ai
-from .tts import generate_speech
+from .translate_ai import translate_and_ask_ai, translate_and_ask_ai_stream
+from .tts import generate_speech, generate_speech_stream
 import logging
 import uvicorn
 import time
@@ -62,27 +62,74 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+def stream_transcribe_pipeline(audio_path: str, lang: str, request_id: str):
+    """Pipeline de streaming complet: transcription -> traduction+IA -> TTS -> audio"""
+    try:
+        # ÉTAPE 1: Transcription de l'audio (non-streaming, nécessaire avant)
+        step_start = time.time()
+        logger.info(f"[REQUEST {request_id}] ÉTAPE 1/3: Transcription de l'audio...")
+        
+        transcription, detected_lang = transcribe(audio_path, lang)
+        if lang is None:
+            lang = detected_lang
+        
+        step_duration = time.time() - step_start
+        logger.info(f"[REQUEST {request_id}] ✓ ÉTAPE 1 terminée en {step_duration:.2f}s")
+        logger.info(f"[REQUEST {request_id}] Langue détectée: {lang}")
+        logger.info(f"[REQUEST {request_id}] Transcription: {transcription[:100]}..." if len(transcription) > 100 else f"[REQUEST {request_id}] Transcription: {transcription}")
+        
+        # ÉTAPE 2: Traduction et réponse IA en streaming
+        step_start = time.time()
+        logger.info(f"[REQUEST {request_id}] ÉTAPE 2/3: Traduction et génération de réponse IA (streaming)...")
+        
+        # Obtenir le stream de texte traduit
+        text_stream = translate_and_ask_ai_stream(transcription, output_language=lang)
+        
+        # ÉTAPE 3: Génération de la synthèse vocale en streaming
+        logger.info(f"[REQUEST {request_id}] ÉTAPE 3/3: Génération de la synthèse vocale (streaming)...")
+        
+        # Streamer l'audio directement depuis le stream de texte
+        audio_stream = generate_speech_stream(text_stream, lang, audio_path)
+        
+        step_duration = time.time() - step_start
+        logger.info(f"[REQUEST {request_id}] ✓ ÉTAPE 2-3 terminées en {step_duration:.2f}s")
+        
+        # Yielder les chunks audio
+        for audio_chunk in audio_stream:
+            yield audio_chunk
+        
+        total_duration = time.time() - step_start
+        logger.info(f"[REQUEST {request_id}] ✓✓✓ STREAMING TERMINÉ avec succès en {total_duration:.2f}s ✓✓✓")
+        logger.info(f"=" * 80)
+    
+    except Exception as e:
+        logger.error(f"[REQUEST {request_id}] ✗✗✗ ERREUR dans le pipeline streaming ✗✗✗")
+        logger.error(f"[REQUEST {request_id}] Type d'erreur: {type(e).__name__}")
+        logger.error(f"[REQUEST {request_id}] Message: {str(e)}", exc_info=True)
+        logger.info(f"=" * 80)
+        raise
+
+
 @app.post("/transcribe")
 async def transcribe_endpoint(audio: UploadFile = File(...), lang:str = None):
     """
     Endpoint pour transcrire un fichier audio.
-    Reçoit un fichier audio et retourne la transcription en audio.
+    Reçoit un fichier audio et retourne la transcription en audio en streaming.
     """
     # Timestamp de début
     request_start = time.time()
     request_id = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{int(time.time() * 1000) % 1000}"
     
     logger.info(f"=" * 80)
-    logger.info(f"[REQUEST {request_id}] Nouvelle requête de transcription reçue")
+    logger.info(f"[REQUEST {request_id}] Nouvelle requête de transcription (STREAMING) reçue")
     logger.info(f"[REQUEST {request_id}] Fichier: {audio.filename}, Type: {audio.content_type}")
     
     tmp_input_path = None
-    tmp_output_path = None
     
     try:
         # ÉTAPE 1: Sauvegarde du fichier audio
         step_start = time.time()
-        logger.info(f"[REQUEST {request_id}] ÉTAPE 1/4: Sauvegarde du fichier audio...")
+        logger.info(f"[REQUEST {request_id}] ÉTAPE 0/3: Sauvegarde du fichier audio...")
         
         with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_input:
             content = await audio.read()
@@ -91,69 +138,31 @@ async def transcribe_endpoint(audio: UploadFile = File(...), lang:str = None):
             tmp_input_path = tmp_input.name
         
         step_duration = time.time() - step_start
-        logger.info(f"[REQUEST {request_id}] ✓ ÉTAPE 1 terminée en {step_duration:.2f}s - Taille: {file_size:.2f} KB")
+        logger.info(f"[REQUEST {request_id}] ✓ ÉTAPE 0 terminée en {step_duration:.2f}s - Taille: {file_size:.2f} KB")
         logger.info(f"[REQUEST {request_id}] Fichier temporaire créé: {tmp_input_path}")
         
-        # ÉTAPE 2: Création du fichier de sortie
-        step_start = time.time()
-        logger.info(f"[REQUEST {request_id}] ÉTAPE 2/4: Création du fichier de sortie...")
-        
-        tmp_output_fd, tmp_output_path = tempfile.mkstemp(suffix=".wav")
-        os.close(tmp_output_fd)
-        
-        step_duration = time.time() - step_start
-        logger.info(f"[REQUEST {request_id}] ✓ ÉTAPE 2 terminée en {step_duration:.2f}s")
-        logger.info(f"[REQUEST {request_id}] Fichier de sortie: {tmp_output_path}")
-        
-        # ÉTAPE 3: Transcription de l'audio
-        step_start = time.time()
-        logger.info(f"[REQUEST {request_id}] ÉTAPE 3/4: Transcription de l'audio...")
-        
-        transcription, lang = transcribe(tmp_input_path, lang)
-        
-        step_duration = time.time() - step_start
-        logger.info(f"[REQUEST {request_id}] ✓ ÉTAPE 3 terminée en {step_duration:.2f}s")
-        logger.info(f"[REQUEST {request_id}] Langue détectée: {lang}")
-        logger.info(f"[REQUEST {request_id}] Transcription: {transcription[:100]}..." if len(transcription) > 100 else f"[REQUEST {request_id}] Transcription: {transcription}")
-        
-        # ÉTAPE 3.1: Traduction et réponse IA
-        step_start = time.time()
-        logger.info(f"[REQUEST {request_id}] ÉTAPE 3.1/4: Traduction et génération de réponse IA...")
-        
-        ai_response = translate_and_ask_ai(transcription, output_language=lang)
-        
-        step_duration = time.time() - step_start
-        logger.info(f"[REQUEST {request_id}] ✓ ÉTAPE 3.1 terminée en {step_duration:.2f}s")
-        logger.info(f"[REQUEST {request_id}] Réponse IA: {ai_response[:100]}..." if len(ai_response) > 100 else f"[REQUEST {request_id}] Réponse IA: {ai_response}")
-        
-        # ÉTAPE 4: Génération de la synthèse vocale
-        step_start = time.time()
-        logger.info(f"[REQUEST {request_id}] ÉTAPE 4/4: Génération de la synthèse vocale...")
-        
-        generate_speech(ai_response, lang, tmp_input_path, tmp_output_path)
-        
-        step_duration = time.time() - step_start
-        logger.info(f"[REQUEST {request_id}] ✓ ÉTAPE 4 terminée en {step_duration:.2f}s")
-        
-        # Lecture et envoi du fichier audio
-        logger.info(f"[REQUEST {request_id}] Lecture du fichier audio généré...")
-        with open(tmp_output_path, "rb") as f:
-            audio_content = f.read()
-        
-        output_size = len(audio_content) / 1024  # Taille en KB
-        logger.info(f"[REQUEST {request_id}] Taille du fichier de sortie: {output_size:.2f} KB")
+        # Créer le générateur de streaming
+        def generate():
+            try:
+                for chunk in stream_transcribe_pipeline(tmp_input_path, lang, request_id):
+                    yield chunk
+            finally:
+                # Nettoyer le fichier temporaire
+                if tmp_input_path and os.path.exists(tmp_input_path):
+                    os.unlink(tmp_input_path)
+                    logger.info(f"[REQUEST {request_id}] Fichier d'entrée supprimé: {tmp_input_path}")
         
         # Durée totale
         total_duration = time.time() - request_start
-        logger.info(f"[REQUEST {request_id}] ✓✓✓ REQUÊTE TERMINÉE avec succès en {total_duration:.2f}s ✓✓✓")
-        logger.info(f"=" * 80)
+        logger.info(f"[REQUEST {request_id}] Début du streaming après {total_duration:.2f}s")
         
-        # Retourner le fichier audio comme réponse
-        return Response(
-            content=audio_content,
+        # Retourner le stream audio
+        return StreamingResponse(
+            generate(),
             media_type="audio/wav",
             headers={
-                "Content-Disposition": f"attachment; filename={tmp_output_path}",
+                "Content-Type": "audio/wav",
+                "X-Request-ID": request_id,
                 "X-Request-Duration": f"{total_duration:.2f}s"
             }
         )
@@ -165,17 +174,11 @@ async def transcribe_endpoint(audio: UploadFile = File(...), lang:str = None):
         logger.error(f"[REQUEST {request_id}] Message: {str(e)}", exc_info=True)
         logger.info(f"=" * 80)
         
-        raise HTTPException(status_code=500, detail=f"Erreur lors de l'API: {str(e)}")
-    
-    finally:
-        # Nettoyer les fichiers temporaires
-        logger.info(f"[REQUEST {request_id}] Nettoyage des fichiers temporaires...")
+        # Nettoyer en cas d'erreur
         if tmp_input_path and os.path.exists(tmp_input_path):
             os.unlink(tmp_input_path)
-            logger.info(f"[REQUEST {request_id}] Fichier d'entrée supprimé: {tmp_input_path}")
-        if tmp_output_path and os.path.exists(tmp_output_path):
-            os.unlink(tmp_output_path)
-            logger.info(f"[REQUEST {request_id}] Fichier de sortie supprimé: {tmp_output_path}")
+        
+        raise HTTPException(status_code=500, detail=f"Erreur lors de l'API: {str(e)}")
 
 @app.get("/")
 async def root():

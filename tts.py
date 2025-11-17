@@ -8,6 +8,10 @@ from openvoice import se_extractor
 from openvoice.api import ToneColorConverter
 import time
 from logging.handlers import RotatingFileHandler
+from typing import Generator
+import tempfile
+import io
+import re
 
 # Configuration du logging
 os.makedirs("logs", exist_ok=True)
@@ -37,7 +41,10 @@ logger.addHandler(file_handler)
 logger.addHandler(console_handler)
 
 
-from transformers import VitsModel, AutoTokenizer
+from transformers import VitsModel, AutoTokenizer, set_seed
+
+set_seed(42)
+
 
 logger.info("=" * 80)
 logger.info("INITIALISATION DES MODÈLES TTS")
@@ -47,7 +54,7 @@ logger.info("=" * 80)
 logger.info("Chargement du modèle TTS Fongbe...")
 fon_start = time.time()
 try:
-    fon_tts = VitsModel.from_pretrained("facebook/mms-tts-fon")
+    fon_tts = VitsModel.from_pretrained("facebook/mms-tts-fon", device_map="auto", dtype=torch.float16)
     fon_tokenizer = AutoTokenizer.from_pretrained("facebook/mms-tts-fon")
     fon_duration = time.time() - fon_start
     logger.info(f"✓ Modèle TTS Fongbe chargé avec succès en {fon_duration:.2f}s")
@@ -59,7 +66,7 @@ except Exception as e:
 logger.info("Chargement du modèle TTS Yoruba...")
 yor_start = time.time()
 try:
-    yor_tts = VitsModel.from_pretrained("facebook/mms-tts-yor")
+    yor_tts = VitsModel.from_pretrained("facebook/mms-tts-yor",device_map="auto", dtype=torch.float16)
     yor_tokenizer = AutoTokenizer.from_pretrained("facebook/mms-tts-yor")
     yor_duration = time.time() - yor_start
     logger.info(f"✓ Modèle TTS Yoruba chargé avec succès en {yor_duration:.2f}s")
@@ -207,7 +214,7 @@ def generate_speech(text: str, lang: str, input_audio_path: str, output_audio_pa
             token_start = time.time()
             logger.info("Tokenization du texte...")
             logger.info(text)
-            inputs = fon_tokenizer(text, return_tensors="pt")
+            inputs = fon_tokenizer(text, return_tensors="pt").to(fon_tts.device)
             sampling_rate = fon_tts.config.sampling_rate
             token_duration = time.time() - token_start
             logger.info(f"✓ Tokenization terminée en {token_duration:.2f}s (sample rate: {sampling_rate}Hz)")
@@ -266,7 +273,7 @@ def generate_speech(text: str, lang: str, input_audio_path: str, output_audio_pa
             # Tokenization
             token_start = time.time()
             logger.info("Tokenization du texte...")
-            inputs = yor_tokenizer(text, return_tensors="pt")
+            inputs = yor_tokenizer(text, return_tensors="pt").to(yor_tts.device)
             sampling_rate = yor_tts.config.sampling_rate
             token_duration = time.time() - token_start
             logger.info(f"✓ Tokenization terminée en {token_duration:.2f}s (sample rate: {sampling_rate}Hz)")
@@ -326,5 +333,166 @@ def generate_speech(text: str, lang: str, input_audio_path: str, output_audio_pa
     except Exception as e:
         duration = time.time() - start_time
         logger.error(f"✗ Erreur lors de la génération vocale après {duration:.2f}s: {str(e)}", exc_info=True)
+        logger.info(f"=" * 80)
+        raise
+
+
+def split_text_into_chunks(text: str, max_chunk_length: int = 50) -> list:
+    """Divise un texte en chunks pour traitement TTS"""
+    # Diviser par phrases d'abord
+    sentences = re.split(r'([.!?]+)', text)
+    result = []
+    current_chunk = ""
+    
+    for i in range(0, len(sentences) - 1, 2):
+        if i + 1 < len(sentences):
+            sentence = sentences[i] + sentences[i + 1]
+        else:
+            sentence = sentences[i]
+        
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+        
+        # Si le chunk actuel + la phrase dépasse la limite, sauvegarder le chunk
+        if current_chunk and len(current_chunk) + len(sentence) > max_chunk_length:
+            result.append(current_chunk.strip())
+            current_chunk = sentence
+        else:
+            current_chunk += " " + sentence if current_chunk else sentence
+    
+    if current_chunk:
+        result.append(current_chunk.strip())
+    
+    return [chunk for chunk in result if chunk]
+
+
+def generate_speech_chunk(text_chunk: str, lang: str):
+    """Génère l'audio pour un chunk de texte"""
+    try:
+        if lang == "fon":
+            inputs = fon_tokenizer(text_chunk, return_tensors="pt").to(fon_tts.device)
+            sampling_rate = fon_tts.config.sampling_rate
+            
+            with torch.no_grad():
+                speech_output = fon_tts(**inputs).waveform
+            
+            data_tts = pad_array(
+                speech_output.cpu().numpy().squeeze().astype(np.float32),
+                sampling_rate,
+            )
+            
+            return data_tts, sampling_rate
+        
+        elif lang == "yor":
+            inputs = yor_tokenizer(text_chunk, return_tensors="pt").to(yor_tts.device)
+            sampling_rate = yor_tts.config.sampling_rate
+            
+            with torch.no_grad():
+                speech_output = yor_tts(**inputs).waveform
+            
+            data_tts = pad_array(
+                speech_output.cpu().numpy().squeeze().astype(np.float32),
+                sampling_rate,
+            )
+            
+            return data_tts, sampling_rate
+        
+        else:
+            raise ValueError(f"Langue non supportée: {lang}")
+    
+    except Exception as e:
+        logger.error(f"✗ Erreur lors de la génération d'un chunk: {str(e)}", exc_info=True)
+        raise
+
+
+def convert_audio_chunk_to_wav_bytes(audio_data: np.ndarray, sampling_rate: int) -> bytes:
+    """Convertit un chunk audio en bytes WAV"""
+    buffer = io.BytesIO()
+    sf.write(buffer, audio_data, sampling_rate, format='WAV')
+    return buffer.getvalue()
+
+
+def concatenate_audio_chunks(chunks: list, sampling_rate: int) -> np.ndarray:
+    """Concatène plusieurs chunks audio"""
+    if not chunks:
+        return np.array([])
+    return np.concatenate(chunks)
+
+
+def generate_speech_stream(text_stream: Generator[str, None, None], lang: str, input_audio_path: str) -> Generator[bytes, None, None]:
+    """Génère la synthèse vocale en streaming à partir d'un stream de texte"""
+    start_time = time.time()
+    logger.info(f"=" * 80)
+    logger.info(f"GÉNÉRATION DE SYNTHÈSE VOCALE (STREAMING)")
+    logger.info(f"Langue: {lang}")
+    logger.info(f"Input: {input_audio_path}")
+    
+    accumulated_text = ""
+    chunk_count = 0
+    audio_chunks = []
+    sampling_rate = None
+    
+    try:
+        # Accumuler le texte jusqu'à avoir des chunks significatifs
+        text_buffer = ""
+        
+        for text_chunk in text_stream:
+            text_buffer += text_chunk
+            accumulated_text += text_chunk
+            
+            # Diviser en chunks pour TTS
+            chunks = split_text_into_chunks(text_buffer, max_chunk_length=50)
+            
+            # Traiter tous les chunks sauf le dernier (qui peut être incomplet)
+            for chunk in chunks[:-1]:
+                if chunk:
+                    chunk_count += 1
+                    logger.info(f"Génération audio chunk {chunk_count}: {chunk[:50]}...")
+                    
+                    # Générer l'audio pour ce chunk
+                    audio_data, sr = generate_speech_chunk(chunk, lang)
+                    if sampling_rate is None:
+                        sampling_rate = sr
+                    audio_chunks.append(audio_data)
+                    
+                    # Si on a assez de chunks, envoyer un batch
+                    if len(audio_chunks) >= 2:  # Envoyer par batch de 2 chunks
+                        concatenated = concatenate_audio_chunks(audio_chunks, sampling_rate)
+                        wav_bytes = convert_audio_chunk_to_wav_bytes(concatenated, sampling_rate)
+                        yield wav_bytes
+                        audio_chunks = []
+            
+            # Garder le dernier chunk dans le buffer (peut être incomplet)
+            text_buffer = chunks[-1] if chunks else ""
+        
+        # Traiter le dernier chunk restant
+        if text_buffer.strip():
+            chunk_count += 1
+            logger.info(f"Génération audio chunk final {chunk_count}: {text_buffer[:50]}...")
+            
+            audio_data, sr = generate_speech_chunk(text_buffer, lang)
+            if sampling_rate is None:
+                sampling_rate = sr
+            audio_chunks.append(audio_data)
+        
+        # Envoyer les chunks restants
+        if audio_chunks:
+            concatenated = concatenate_audio_chunks(audio_chunks, sampling_rate)
+            wav_bytes = convert_audio_chunk_to_wav_bytes(concatenated, sampling_rate)
+            yield wav_bytes
+        
+        # Note: Le clonage de voix est complexe en streaming
+        # On pourrait l'appliquer par chunks, mais cela nécessiterait des fichiers temporaires
+        # Pour l'instant, on génère l'audio sans clonage en streaming
+        # Le clonage pourrait être fait côté client ou en post-traitement
+        
+        total_duration = time.time() - start_time
+        logger.info(f"✓✓ SYNTHÈSE VOCALE STREAMING TERMINÉE en {total_duration:.2f}s ({chunk_count} chunks)")
+        logger.info(f"=" * 80)
+    
+    except Exception as e:
+        duration = time.time() - start_time
+        logger.error(f"✗ Erreur lors de la génération vocale streaming après {duration:.2f}s: {str(e)}", exc_info=True)
         logger.info(f"=" * 80)
         raise

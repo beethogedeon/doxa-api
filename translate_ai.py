@@ -7,6 +7,8 @@ from dotenv import load_dotenv
 import logging
 import time
 from logging.handlers import RotatingFileHandler
+import re
+from typing import Generator
 
 # Configuration du logging
 os.makedirs("logs", exist_ok=True)
@@ -88,25 +90,16 @@ def ask_ai(text: str):
         logger.info("Appel de l'API OpenAI en cours...")
         api_call_start = time.time()
         
-        completion = client.chat.completions.create(
-            model="gpt-4.1-mini-2025-04-14",
+        completion = client.responses.create(
+            model="gpt-4.1-mini",
             #reasoning_effort= "none",
             #verbosity = "low",
-            messages=[
-                {
-                    "role": "system",
-                    "content": """Tu es Doxa, une intelligence artificielle textuelle et vocale, multilingue et capable de s'exprimer aussi en langues locales.
+            instructions="""Tu es Doxa, une intelligence artificielle textuelle et vocale, multilingue et capable de s'exprimer aussi en langues locales.
                     Doxa aide les utilisatrices à réaliser un auto-diagnostic pour mieux comprendre leurs symptômes et identifier d'éventuels troubles.
-                    Elle informe, conseille et sensibilise sur la santé mentale des femmes béninoises et africaines, en favorisant la prévention, l'éducation et le bien-être émotionnel. Soit succinct dans tes réponses."""
-                },
-                {
-                    "role": "user",
-                    "content": text
-                }
-            ],
-            max_completion_tokens=100
-            
-        )
+                    Elle informe, conseille et sensibilise sur la santé mentale des femmes béninoises et africaines, en favorisant la prévention, l'éducation et le bien-être émotionnel. Soit succinct dans tes réponses.""",
+            input=text,
+            max_outpu_tokens=100
+            )
         
         api_call_duration = time.time() - api_call_start
         logger.info(f"✓ Réponse de l'API reçue en {api_call_duration:.2f}s")
@@ -171,5 +164,162 @@ def translate_and_ask_ai(text: str, output_language: str):
     except Exception as e:
         duration = time.time() - start_time
         logger.error(f"✗ Erreur dans le pipeline après {duration:.2f}s: {str(e)}", exc_info=True)
+        logger.info(f"=" * 80)
+        raise
+
+
+def split_text_into_sentences(text: str) -> list:
+    """Divise un texte en phrases pour traitement par chunks"""
+    # Diviser par points, points d'exclamation, points d'interrogation
+    sentences = re.split(r'([.!?]+)', text)
+    # Recombiner les phrases avec leur ponctuation
+    result = []
+    for i in range(0, len(sentences) - 1, 2):
+        if i + 1 < len(sentences):
+            result.append(sentences[i] + sentences[i + 1])
+        else:
+            result.append(sentences[i])
+    # Filtrer les phrases vides
+    return [s.strip() for s in result if s.strip()]
+
+
+def translate_text_stream(text: str, source_language: str = "auto", target_language: str = "fr") -> Generator[str, None, None]:
+    """Traduit un texte par chunks (phrases) en streaming"""
+    start_time = time.time()
+    logger.info(f"Traduction streaming {source_language} → {target_language}")
+    
+    try:
+        # Diviser le texte en phrases
+        sentences = split_text_into_sentences(text)
+        logger.info(f"Texte divisé en {len(sentences)} phrases")
+        
+        translator = GoogleTranslator(source=source_language, target=target_language)
+        
+        for sentence in sentences:
+            if sentence:
+                translated = translator.translate(sentence)
+                yield translated + " "
+        
+        duration = time.time() - start_time
+        logger.info(f"✓ Traduction streaming réussie en {duration:.2f}s")
+    
+    except Exception as e:
+        duration = time.time() - start_time
+        logger.error(f"✗ Erreur lors de la traduction streaming après {duration:.2f}s: {str(e)}", exc_info=True)
+        raise
+
+
+def ask_ai_stream(text: str) -> Generator[str, None, None]:
+    """Envoie une requête à l'IA et stream la réponse"""
+    start_time = time.time()
+    text_preview = text[:100] + "..." if len(text) > 100 else text
+    
+    logger.info(f"=" * 60)
+    logger.info(f"Envoi de la requête à l'IA (streaming)")
+    logger.info(f"Prompt utilisateur: {text_preview}")
+    
+    try:
+        logger.info("Appel de l'API OpenAI en streaming...")
+        api_call_start = time.time()
+        
+        stream = client.responses.create(
+            model="gpt-4.1-mini",
+            instructions="""Tu es Doxa, une intelligence artificielle textuelle et vocale, multilingue et capable de s'exprimer aussi en langues locales.
+                    Doxa aide les utilisatrices à réaliser un auto-diagnostic pour mieux comprendre leurs symptômes et identifier d'éventuels troubles.
+                    Elle informe, conseille et sensibilise sur la santé mentale des femmes béninoises et africaines, en favorisant la prévention, l'éducation et le bien-être émotionnel. Soit succinct dans tes réponses.""",
+            input=text,
+            max_output_tokens=100,
+            stream=True
+        )
+        
+        accumulated_text = ""
+        for chunk in stream:
+            # Gérer différentes structures de réponse streaming
+            try:
+                # Structure standard OpenAI streaming
+                if hasattr(chunk, 'choices') and chunk.choices:
+                    delta = chunk.choices[0].delta
+                    if hasattr(delta, 'content') and delta.content:
+                        content = delta.content
+                        accumulated_text += content
+                        yield content
+                # Structure alternative (si l'API responses a une structure différente)
+                elif hasattr(chunk, 'content') and chunk.content:
+                    content = chunk.content
+                    accumulated_text += content
+                    yield content
+                # Structure avec message direct
+                elif hasattr(chunk, 'message') and hasattr(chunk.message, 'content') and chunk.message.content:
+                    content = chunk.message.content
+                    accumulated_text += content
+                    yield content
+            except Exception as e:
+                logger.warning(f"Erreur lors du traitement d'un chunk: {str(e)}")
+                continue
+        
+        api_call_duration = time.time() - api_call_start
+        logger.info(f"✓ Réponse de l'API streaming reçue en {api_call_duration:.2f}s")
+        
+        total_duration = time.time() - start_time
+        logger.info(f"Réponse de l'IA (streaming): {accumulated_text[:100]}..." if len(accumulated_text) > 100 else f"Réponse de l'IA (streaming): {accumulated_text}")
+        logger.info(f"✓ Requête IA streaming complétée en {total_duration:.2f}s")
+        logger.info(f"=" * 60)
+    
+    except Exception as e:
+        duration = time.time() - start_time
+        logger.error(f"✗ Erreur lors de l'appel à l'IA streaming après {duration:.2f}s: {str(e)}", exc_info=True)
+        logger.info(f"=" * 60)
+        raise
+
+
+def translate_and_ask_ai_stream(text: str, output_language: str) -> Generator[str, None, None]:
+    """Pipeline complet en streaming: traduction vers français, IA, traduction vers langue cible"""
+    start_time = time.time()
+    logger.info(f"=" * 80)
+    logger.info(f"DÉBUT DU PIPELINE TRADUCTION + IA (STREAMING)")
+    logger.info(f"Langue de sortie souhaitée: {output_language}")
+    
+    try:
+        # ÉTAPE 1: Traduction vers le français (non-streaming car nécessaire avant l'IA)
+        step_start = time.time()
+        logger.info(f"ÉTAPE 1/3: Traduction vers le français...")
+        translated_text = translate_text(text, target_language="fr")
+        step_duration = time.time() - step_start
+        logger.info(f"✓ ÉTAPE 1 terminée en {step_duration:.2f}s")
+        
+        # ÉTAPE 2: Génération de la réponse IA en streaming
+        step_start = time.time()
+        logger.info(f"ÉTAPE 2/3: Génération de la réponse IA (streaming)...")
+        
+        # Accumuler la réponse IA pour la traduction
+        ai_response_chunks = []
+        for chunk in ask_ai_stream(translated_text):
+            ai_response_chunks.append(chunk)
+            # Streamer directement les chunks traduits
+            # Mais on doit d'abord accumuler pour traduire correctement
+            pass
+        
+        # Reconstruire la réponse complète
+        full_ai_response = "".join(ai_response_chunks)
+        step_duration = time.time() - step_start
+        logger.info(f"✓ ÉTAPE 2 terminée en {step_duration:.2f}s")
+        
+        # ÉTAPE 3: Traduction de la réponse vers la langue cible en streaming
+        step_start = time.time()
+        logger.info(f"ÉTAPE 3/3: Traduction vers {output_language} (streaming)...")
+        
+        for translated_chunk in translate_text_stream(full_ai_response, source_language="fr", target_language=output_language):
+            yield translated_chunk
+        
+        step_duration = time.time() - step_start
+        logger.info(f"✓ ÉTAPE 3 terminée en {step_duration:.2f}s")
+        
+        total_duration = time.time() - start_time
+        logger.info(f"✓✓ PIPELINE STREAMING TERMINÉ avec succès en {total_duration:.2f}s")
+        logger.info(f"=" * 80)
+    
+    except Exception as e:
+        duration = time.time() - start_time
+        logger.error(f"✗ Erreur dans le pipeline streaming après {duration:.2f}s: {str(e)}", exc_info=True)
         logger.info(f"=" * 80)
         raise
