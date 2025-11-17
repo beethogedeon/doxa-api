@@ -245,7 +245,7 @@ def generate_speech(text: str, lang: str, input_audio_path: str, output_audio_pa
             # Clonage de voix
             clone_start = time.time()
             logger.info("Clonage de la voix...")
-            clone_success = clone_voice(input_audio_path, output_audio_path)
+            clone_success = clone_voice(output_audio_path, output_audio_path)
             clone_duration = time.time() - clone_start
             
             if clone_success:

@@ -93,6 +93,9 @@ def detect_language(audio_path: str):
         _, probs = model.detect_language(mel)
         detected_lang = max(probs, key=probs.get)
         confidence = probs[detected_lang]
+
+        if confidence < 0.8 :
+            raise ValueError("La confiance est trop faible pour détecter la langue")
         
         duration = time.time() - start_time
         logger.info(f"✓ Langue détectée: {detected_lang} (confiance: {confidence:.2%}) en {duration:.2f}s")
@@ -109,7 +112,7 @@ def detect_language(audio_path: str):
         raise
 
 
-def transcribe(audio_path: str):
+def transcribe(audio_path: str, lang: str):
     """Transcrit l'audio en fonction de la langue détectée"""
     start_time = time.time()
     logger.info(f"=" * 60)
@@ -117,9 +120,12 @@ def transcribe(audio_path: str):
     
     try:
         # Détection de la langue
-        lang, mel = detect_language(audio_path)
+        if lang is None:
+            lang, mel = detect_language(audio_path)
+        else:
+            mel = None
         
-        if lang == "yor":
+        if lang == "yo":
             logger.info("Utilisation de Whisper pour le Yoruba...")
             transcribe_start = time.time()
             
