@@ -307,12 +307,24 @@ def translate_and_ask_ai_stream(text: str, output_language: str) -> Generator[st
         # ÉTAPE 3: Traduction de la réponse vers la langue cible en streaming
         step_start = time.time()
         logger.info(f"ÉTAPE 3/3: Traduction vers {output_language} (streaming)...")
+        logger.info(f"Réponse IA complète à traduire: {full_ai_response[:100]}..." if len(full_ai_response) > 100 else f"Réponse IA complète: {full_ai_response}")
         
+        if not full_ai_response or not full_ai_response.strip():
+            logger.warning("Réponse IA vide, rien à traduire!")
+            return
+        
+        translated_chunks_count = 0
         for translated_chunk in translate_text_stream(full_ai_response, source_language="fr", target_language=output_language):
-            yield translated_chunk
+            if translated_chunk and translated_chunk.strip():
+                translated_chunks_count += 1
+                logger.debug(f"Chunk traduit {translated_chunks_count}: {translated_chunk[:50]}...")
+                yield translated_chunk
         
         step_duration = time.time() - step_start
-        logger.info(f"✓ ÉTAPE 3 terminée en {step_duration:.2f}s")
+        logger.info(f"✓ ÉTAPE 3 terminée en {step_duration:.2f}s ({translated_chunks_count} chunks traduits)")
+        
+        if translated_chunks_count == 0:
+            logger.warning("Aucun chunk traduit généré!")
         
         total_duration = time.time() - start_time
         logger.info(f"✓✓ PIPELINE STREAMING TERMINÉ avec succès en {total_duration:.2f}s")

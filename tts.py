@@ -339,16 +339,19 @@ def generate_speech(text: str, lang: str, input_audio_path: str, output_audio_pa
 
 def split_text_into_chunks(text: str, max_chunk_length: int = 50) -> list:
     """Divise un texte en chunks pour traitement TTS"""
+    if not text or not text.strip():
+        return []
+    
     # Diviser par phrases d'abord
     sentences = re.split(r'([.!?]+)', text)
     result = []
     current_chunk = ""
     
-    for i in range(0, len(sentences) - 1, 2):
+    for i in range(0, len(sentences), 2):
         if i + 1 < len(sentences):
             sentence = sentences[i] + sentences[i + 1]
         else:
-            sentence = sentences[i]
+            sentence = sentences[i] if i < len(sentences) else ""
         
         sentence = sentence.strip()
         if not sentence:
@@ -361,10 +364,23 @@ def split_text_into_chunks(text: str, max_chunk_length: int = 50) -> list:
         else:
             current_chunk += " " + sentence if current_chunk else sentence
     
-    if current_chunk:
+    if current_chunk and current_chunk.strip():
         result.append(current_chunk.strip())
     
-    return [chunk for chunk in result if chunk]
+    # Si aucune phrase trouvée, diviser par espaces
+    if not result and text.strip():
+        words = text.strip().split()
+        current_chunk = ""
+        for word in words:
+            if current_chunk and len(current_chunk) + len(word) + 1 > max_chunk_length:
+                result.append(current_chunk.strip())
+                current_chunk = word
+            else:
+                current_chunk += " " + word if current_chunk else word
+        if current_chunk:
+            result.append(current_chunk.strip())
+    
+    return [chunk for chunk in result if chunk and chunk.strip()]
 
 
 def generate_speech_chunk(text_chunk: str, lang: str):
@@ -430,7 +446,7 @@ def generate_speech_stream(text_stream: Generator[str, None, None], lang: str, i
     
     accumulated_text = ""
     chunk_count = 0
-    audio_chunks = []
+    all_audio_chunks = []
     sampling_rate = None
     
     try:
@@ -438,49 +454,95 @@ def generate_speech_stream(text_stream: Generator[str, None, None], lang: str, i
         text_buffer = ""
         
         for text_chunk in text_stream:
+            if not text_chunk:
+                continue
+                
             text_buffer += text_chunk
             accumulated_text += text_chunk
+            logger.debug(f"Texte reçu: {text_chunk[:50]}..., Buffer total: {len(text_buffer)} chars")
             
             # Diviser en chunks pour TTS
             chunks = split_text_into_chunks(text_buffer, max_chunk_length=50)
+            logger.debug(f"Chunks trouvés: {len(chunks)}")
             
             # Traiter tous les chunks sauf le dernier (qui peut être incomplet)
             for chunk in chunks[:-1]:
-                if chunk:
+                if chunk and chunk.strip():
                     chunk_count += 1
                     logger.info(f"Génération audio chunk {chunk_count}: {chunk[:50]}...")
                     
-                    # Générer l'audio pour ce chunk
-                    audio_data, sr = generate_speech_chunk(chunk, lang)
-                    if sampling_rate is None:
-                        sampling_rate = sr
-                    audio_chunks.append(audio_data)
-                    
-                    # Si on a assez de chunks, envoyer un batch
-                    if len(audio_chunks) >= 2:  # Envoyer par batch de 2 chunks
-                        concatenated = concatenate_audio_chunks(audio_chunks, sampling_rate)
-                        wav_bytes = convert_audio_chunk_to_wav_bytes(concatenated, sampling_rate)
-                        yield wav_bytes
-                        audio_chunks = []
+                    try:
+                        # Générer l'audio pour ce chunk
+                        audio_data, sr = generate_speech_chunk(chunk, lang)
+                        if sampling_rate is None:
+                            sampling_rate = sr
+                        if len(audio_data) > 0:
+                            all_audio_chunks.append(audio_data)
+                            logger.debug(f"Chunk audio généré: {len(audio_data)} échantillons")
+                        else:
+                            logger.warning(f"Chunk audio vide pour: {chunk[:50]}")
+                    except Exception as e:
+                        logger.error(f"Erreur lors de la génération du chunk audio: {str(e)}", exc_info=True)
+                        continue
             
             # Garder le dernier chunk dans le buffer (peut être incomplet)
-            text_buffer = chunks[-1] if chunks else ""
+            text_buffer = chunks[-1] if chunks and len(chunks) > 0 else ""
         
-        # Traiter le dernier chunk restant
-        if text_buffer.strip():
+        # Traiter le dernier chunk restant dans le buffer
+        if text_buffer and text_buffer.strip():
             chunk_count += 1
             logger.info(f"Génération audio chunk final {chunk_count}: {text_buffer[:50]}...")
             
-            audio_data, sr = generate_speech_chunk(text_buffer, lang)
-            if sampling_rate is None:
-                sampling_rate = sr
-            audio_chunks.append(audio_data)
+            try:
+                audio_data, sr = generate_speech_chunk(text_buffer, lang)
+                if sampling_rate is None:
+                    sampling_rate = sr
+                if len(audio_data) > 0:
+                    all_audio_chunks.append(audio_data)
+                    logger.debug(f"Chunk audio final généré: {len(audio_data)} échantillons")
+                else:
+                    logger.warning(f"Chunk audio final vide pour: {text_buffer[:50]}")
+            except Exception as e:
+                logger.error(f"Erreur lors de la génération du chunk audio final: {str(e)}", exc_info=True)
         
-        # Envoyer les chunks restants
-        if audio_chunks:
-            concatenated = concatenate_audio_chunks(audio_chunks, sampling_rate)
-            wav_bytes = convert_audio_chunk_to_wav_bytes(concatenated, sampling_rate)
+        # Vérifier aussi le texte accumulé au cas où il reste quelque chose
+        if accumulated_text and not all_audio_chunks:
+            logger.warning(f"Aucun chunk audio généré mais texte accumulé: {accumulated_text[:100]}")
+            # Essayer de générer avec tout le texte accumulé
+            try:
+                logger.info("Tentative de génération avec tout le texte accumulé...")
+                audio_data, sr = generate_speech_chunk(accumulated_text, lang)
+                if sampling_rate is None:
+                    sampling_rate = sr
+                if len(audio_data) > 0:
+                    all_audio_chunks.append(audio_data)
+                    logger.info("Audio généré avec succès depuis le texte accumulé")
+            except Exception as e:
+                logger.error(f"Erreur lors de la génération avec texte accumulé: {str(e)}", exc_info=True)
+        
+        # Concaténer tous les chunks audio et créer un seul fichier WAV valide
+        if all_audio_chunks:
+            logger.info(f"Concaténation de {len(all_audio_chunks)} chunks audio...")
+            final_audio = concatenate_audio_chunks(all_audio_chunks, sampling_rate)
+            logger.info(f"Audio final: {len(final_audio)} échantillons, {sampling_rate}Hz")
+            
+            if len(final_audio) == 0:
+                logger.error("Audio final vide après concaténation!")
+                raise ValueError("Audio final vide après concaténation")
+            
+            # Créer un seul fichier WAV valide
+            wav_bytes = convert_audio_chunk_to_wav_bytes(final_audio, sampling_rate)
+            logger.info(f"Fichier WAV créé: {len(wav_bytes)} bytes")
+            
+            if len(wav_bytes) == 0:
+                logger.error("Fichier WAV vide après conversion!")
+                raise ValueError("Fichier WAV vide après conversion")
+            
             yield wav_bytes
+        else:
+            error_msg = f"Aucun chunk audio généré! Texte accumulé: {accumulated_text[:100] if accumulated_text else 'vide'}"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
         
         # Note: Le clonage de voix est complexe en streaming
         # On pourrait l'appliquer par chunks, mais cela nécessiterait des fichiers temporaires
