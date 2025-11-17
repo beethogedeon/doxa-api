@@ -184,21 +184,35 @@ def split_text_into_sentences(text: str) -> list:
 
 
 def translate_text_stream(text: str, source_language: str = "auto", target_language: str = "fr") -> Generator[str, None, None]:
-    """Traduit un texte par chunks (phrases) en streaming"""
+    """Traduit un texte par phrases complètes en streaming"""
     start_time = time.time()
     logger.info(f"Traduction streaming {source_language} → {target_language}")
     
     try:
-        # Diviser le texte en phrases
+        # Diviser le texte en phrases complètes (terminées par un point)
         sentences = split_text_into_sentences(text)
         logger.info(f"Texte divisé en {len(sentences)} phrases")
         
         translator = GoogleTranslator(source=source_language, target=target_language)
         
         for sentence in sentences:
-            if sentence:
-                translated = translator.translate(sentence)
-                yield translated + " "
+            if sentence and sentence.strip():
+                # S'assurer que la phrase se termine par un point
+                sentence_clean = sentence.strip()
+                if not sentence_clean.endswith('.'):
+                    sentence_clean += '.'
+                
+                try:
+                    translated = translator.translate(sentence_clean)
+                    # S'assurer que la traduction se termine aussi par un point
+                    if translated and not translated.strip().endswith('.'):
+                        translated = translated.strip() + '.'
+                    logger.debug(f"Phrase traduite: {sentence_clean[:30]}... → {translated[:30]}...")
+                    yield translated + " "
+                except Exception as e:
+                    logger.error(f"Erreur lors de la traduction de la phrase: {str(e)}")
+                    # En cas d'erreur, envoyer la phrase originale
+                    yield sentence_clean + " "
         
         duration = time.time() - start_time
         logger.info(f"✓ Traduction streaming réussie en {duration:.2f}s")
@@ -210,7 +224,7 @@ def translate_text_stream(text: str, source_language: str = "auto", target_langu
 
 
 def ask_ai_stream(text: str) -> Generator[str, None, None]:
-    """Envoie une requête à l'IA et stream la réponse"""
+    """Envoie une requête à l'IA et stream la réponse par phrases complètes"""
     start_time = time.time()
     text_preview = text[:100] + "..." if len(text) > 100 else text
     
@@ -233,29 +247,67 @@ def ask_ai_stream(text: str) -> Generator[str, None, None]:
         )
         
         accumulated_text = ""
-        for chunk in stream:
-            # Gérer différentes structures de réponse streaming
+        buffer = ""
+        
+        for event in stream:
+            # Gérer les événements ResponseTextDeltaEvent
             try:
-                # Structure standard OpenAI streaming
-                if hasattr(chunk, 'choices') and chunk.choices:
-                    delta = chunk.choices[0].delta
-                    if hasattr(delta, 'content') and delta.content:
-                        content = delta.content
-                        accumulated_text += content
-                        yield content
-                # Structure alternative (si l'API responses a une structure différente)
-                elif hasattr(chunk, 'content') and chunk.content:
-                    content = chunk.content
-                    accumulated_text += content
-                    yield content
-                # Structure avec message direct
-                elif hasattr(chunk, 'message') and hasattr(chunk.message, 'content') and chunk.message.content:
-                    content = chunk.message.content
-                    accumulated_text += content
-                    yield content
+                # Vérifier si c'est un événement de delta de texte
+                if hasattr(event, 'type') and event.type == 'response.output_text.delta':
+                    if hasattr(event, 'delta') and event.delta:
+                        delta_text = event.delta
+                        accumulated_text += delta_text
+                        buffer += delta_text
+                        
+                        # Vérifier si on a une phrase complète (terminée par un point)
+                        # Chercher le dernier point dans le buffer
+                        last_period_idx = buffer.rfind('.')
+                        if last_period_idx != -1:
+                            # Extraire toutes les phrases complètes
+                            complete_sentences = buffer[:last_period_idx + 1]
+                            buffer = buffer[last_period_idx + 1:]
+                            
+                            # Diviser en phrases et envoyer chacune
+                            sentences = re.split(r'(\.\s*)', complete_sentences)
+                            current_sentence = ""
+                            for i in range(0, len(sentences) - 1, 2):
+                                if i + 1 < len(sentences):
+                                    sentence = sentences[i] + sentences[i + 1]
+                                else:
+                                    sentence = sentences[i]
+                                
+                                if sentence.strip() and sentence.strip().endswith('.'):
+                                    current_sentence = sentence.strip()
+                                    if current_sentence:
+                                        logger.debug(f"Phrase complète envoyée: {current_sentence[:50]}...")
+                                        yield current_sentence + " "
+                                        current_sentence = ""
+                
+                # Gérer l'événement de fin de texte
+                elif hasattr(event, 'type') and event.type == 'response.output_text.done':
+                    if hasattr(event, 'text') and event.text:
+                        # Si on a encore du texte dans le buffer, l'envoyer
+                        remaining_text = buffer.strip()
+                        if remaining_text:
+                            # S'assurer qu'il se termine par un point
+                            if not remaining_text.endswith('.'):
+                                remaining_text += '.'
+                            logger.debug(f"Dernière phrase envoyée: {remaining_text[:50]}...")
+                            yield remaining_text + " "
+                        buffer = ""
+                        accumulated_text = event.text
+                        
             except Exception as e:
-                logger.warning(f"Erreur lors du traitement d'un chunk: {str(e)}")
+                logger.warning(f"Erreur lors du traitement d'un événement: {str(e)}")
                 continue
+        
+        # Envoyer le reste du buffer s'il y en a
+        if buffer.strip():
+            remaining = buffer.strip()
+            if not remaining.endswith('.'):
+                remaining += '.'
+            logger.debug(f"Buffer restant envoyé: {remaining[:50]}...")
+            yield remaining + " "
         
         api_call_duration = time.time() - api_call_start
         logger.info(f"✓ Réponse de l'API streaming reçue en {api_call_duration:.2f}s")
@@ -273,7 +325,8 @@ def ask_ai_stream(text: str) -> Generator[str, None, None]:
 
 
 def translate_and_ask_ai_stream(text: str, output_language: str) -> Generator[str, None, None]:
-    """Pipeline complet en streaming: traduction vers français, IA, traduction vers langue cible"""
+    """Pipeline complet en streaming: traduction vers français, IA, traduction vers langue cible
+    Les chunks envoyés sont des phrases complètes terminées par un point."""
     start_time = time.time()
     logger.info(f"=" * 80)
     logger.info(f"DÉBUT DU PIPELINE TRADUCTION + IA (STREAMING)")
@@ -287,44 +340,51 @@ def translate_and_ask_ai_stream(text: str, output_language: str) -> Generator[st
         step_duration = time.time() - step_start
         logger.info(f"✓ ÉTAPE 1 terminée en {step_duration:.2f}s")
         
-        # ÉTAPE 2: Génération de la réponse IA en streaming
+        # ÉTAPE 2: Génération de la réponse IA en streaming (phrases complètes)
         step_start = time.time()
-        logger.info(f"ÉTAPE 2/3: Génération de la réponse IA (streaming)...")
+        logger.info(f"ÉTAPE 2/3: Génération de la réponse IA (streaming par phrases)...")
         
-        # Accumuler la réponse IA pour la traduction
-        ai_response_chunks = []
-        for chunk in ask_ai_stream(translated_text):
-            ai_response_chunks.append(chunk)
-            # Streamer directement les chunks traduits
-            # Mais on doit d'abord accumuler pour traduire correctement
-            pass
+        # Accumuler les phrases complètes de l'IA pour la traduction
+        ai_response_sentences = []
+        sentence_count = 0
+        
+        for sentence in ask_ai_stream(translated_text):
+            if sentence and sentence.strip():
+                sentence_clean = sentence.strip()
+                # S'assurer que c'est une phrase complète avec point
+                if not sentence_clean.endswith('.'):
+                    sentence_clean += '.'
+                
+                ai_response_sentences.append(sentence_clean)
+                sentence_count += 1
+                logger.debug(f"Phrase IA reçue {sentence_count}: {sentence_clean[:50]}...")
         
         # Reconstruire la réponse complète
-        full_ai_response = "".join(ai_response_chunks)
+        full_ai_response = " ".join(ai_response_sentences)
         step_duration = time.time() - step_start
-        logger.info(f"✓ ÉTAPE 2 terminée en {step_duration:.2f}s")
-        
-        # ÉTAPE 3: Traduction de la réponse vers la langue cible en streaming
-        step_start = time.time()
-        logger.info(f"ÉTAPE 3/3: Traduction vers {output_language} (streaming)...")
-        logger.info(f"Réponse IA complète à traduire: {full_ai_response[:100]}..." if len(full_ai_response) > 100 else f"Réponse IA complète: {full_ai_response}")
+        logger.info(f"✓ ÉTAPE 2 terminée en {step_duration:.2f}s ({sentence_count} phrases reçues)")
         
         if not full_ai_response or not full_ai_response.strip():
             logger.warning("Réponse IA vide, rien à traduire!")
             return
         
-        translated_chunks_count = 0
-        for translated_chunk in translate_text_stream(full_ai_response, source_language="fr", target_language=output_language):
-            if translated_chunk and translated_chunk.strip():
-                translated_chunks_count += 1
-                logger.debug(f"Chunk traduit {translated_chunks_count}: {translated_chunk[:50]}...")
-                yield translated_chunk
+        # ÉTAPE 3: Traduction de la réponse vers la langue cible en streaming (phrases complètes)
+        step_start = time.time()
+        logger.info(f"ÉTAPE 3/3: Traduction vers {output_language} (streaming par phrases)...")
+        logger.info(f"Réponse IA complète à traduire: {full_ai_response[:100]}..." if len(full_ai_response) > 100 else f"Réponse IA complète: {full_ai_response}")
+        
+        translated_sentences_count = 0
+        for translated_sentence in translate_text_stream(full_ai_response, source_language="fr", target_language=output_language):
+            if translated_sentence and translated_sentence.strip():
+                translated_sentences_count += 1
+                logger.debug(f"Phrase traduite {translated_sentences_count}: {translated_sentence[:50]}...")
+                yield translated_sentence
         
         step_duration = time.time() - step_start
-        logger.info(f"✓ ÉTAPE 3 terminée en {step_duration:.2f}s ({translated_chunks_count} chunks traduits)")
+        logger.info(f"✓ ÉTAPE 3 terminée en {step_duration:.2f}s ({translated_sentences_count} phrases traduites)")
         
-        if translated_chunks_count == 0:
-            logger.warning("Aucun chunk traduit généré!")
+        if translated_sentences_count == 0:
+            logger.warning("Aucune phrase traduite générée!")
         
         total_duration = time.time() - start_time
         logger.info(f"✓✓ PIPELINE STREAMING TERMINÉ avec succès en {total_duration:.2f}s")

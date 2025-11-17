@@ -461,32 +461,45 @@ def generate_speech_stream(text_stream: Generator[str, None, None], lang: str, i
             accumulated_text += text_chunk
             logger.debug(f"Texte reçu: {text_chunk[:50]}..., Buffer total: {len(text_buffer)} chars")
             
-            # Diviser en chunks pour TTS
-            chunks = split_text_into_chunks(text_buffer, max_chunk_length=50)
-            logger.debug(f"Chunks trouvés: {len(chunks)}")
+            # Les chunks reçus sont déjà des phrases complètes terminées par un point
+            # Chercher les phrases complètes dans le buffer
+            sentences = []
+            remaining_buffer = ""
             
-            # Traiter tous les chunks sauf le dernier (qui peut être incomplet)
-            for chunk in chunks[:-1]:
-                if chunk and chunk.strip():
+            # Diviser le buffer par points pour extraire les phrases complètes
+            parts = text_buffer.split('.')
+            for i, part in enumerate(parts):
+                if i < len(parts) - 1:
+                    # C'est une phrase complète (avant le dernier point)
+                    sentence = part.strip()
+                    if sentence:
+                        sentences.append(sentence + '.')
+                else:
+                    # Dernière partie (peut être incomplète)
+                    remaining_buffer = part.strip()
+            
+            # Traiter toutes les phrases complètes
+            for sentence in sentences:
+                if sentence and sentence.strip():
                     chunk_count += 1
-                    logger.info(f"Génération audio chunk {chunk_count}: {chunk[:50]}...")
+                    logger.info(f"Génération audio phrase {chunk_count}: {sentence[:50]}...")
                     
                     try:
-                        # Générer l'audio pour ce chunk
-                        audio_data, sr = generate_speech_chunk(chunk, lang)
+                        # Générer l'audio pour cette phrase complète
+                        audio_data, sr = generate_speech_chunk(sentence, lang)
                         if sampling_rate is None:
                             sampling_rate = sr
                         if len(audio_data) > 0:
                             all_audio_chunks.append(audio_data)
-                            logger.debug(f"Chunk audio généré: {len(audio_data)} échantillons")
+                            logger.debug(f"Phrase audio générée: {len(audio_data)} échantillons")
                         else:
-                            logger.warning(f"Chunk audio vide pour: {chunk[:50]}")
+                            logger.warning(f"Phrase audio vide pour: {sentence[:50]}")
                     except Exception as e:
-                        logger.error(f"Erreur lors de la génération du chunk audio: {str(e)}", exc_info=True)
+                        logger.error(f"Erreur lors de la génération de la phrase audio: {str(e)}", exc_info=True)
                         continue
             
-            # Garder le dernier chunk dans le buffer (peut être incomplet)
-            text_buffer = chunks[-1] if chunks and len(chunks) > 0 else ""
+            # Garder le reste dans le buffer
+            text_buffer = remaining_buffer
         
         # Traiter le dernier chunk restant dans le buffer
         if text_buffer and text_buffer.strip():
