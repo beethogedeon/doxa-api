@@ -63,7 +63,7 @@ app.add_middleware(
 )
 
 @app.post("/transcribe")
-async def transcribe_endpoint(audio: UploadFile = File(...)):
+async def transcribe_endpoint(audio: UploadFile = File(...), lang:str = None):
     """
     Endpoint pour transcrire un fichier audio.
     Reçoit un fichier audio et retourne la transcription en audio.
@@ -109,7 +109,7 @@ async def transcribe_endpoint(audio: UploadFile = File(...)):
         step_start = time.time()
         logger.info(f"[REQUEST {request_id}] ÉTAPE 3/4: Transcription de l'audio...")
         
-        transcription, lang = transcribe(tmp_input_path)
+        transcription, lang = transcribe(tmp_input_path, lang)
         
         step_duration = time.time() - step_start
         logger.info(f"[REQUEST {request_id}] ✓ ÉTAPE 3 terminée en {step_duration:.2f}s")
