@@ -89,7 +89,7 @@ def ask_ai(text: str):
         api_call_start = time.time()
         
         completion = client.chat.completions.create(
-            model="gpt-5-nano-2025-08-07",
+            model="gpt-5.1",
             reasoning_effort= "none",
             verbosity = "low",
             messages=[
