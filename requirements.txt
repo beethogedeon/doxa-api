@@ -11,13 +11,7 @@ librosa
 soundfile
 pyngrok
 git+https://github.com/beethogedeon/deep-translator
+git+https://github.com/beethogedeon/OpenVoice
 openai-whisper==20250625
-faster-whisper
-whisper-timestamped
-unidecode
-eng_to_ipa
-pypinyin
-cn2an
-wavmark
 logging
 uvicorn
