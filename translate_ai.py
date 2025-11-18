@@ -98,7 +98,7 @@ def ask_ai(text: str):
                     Doxa aide les utilisatrices à réaliser un auto-diagnostic pour mieux comprendre leurs symptômes et identifier d'éventuels troubles.
                     Elle informe, conseille et sensibilise sur la santé mentale des femmes béninoises et africaines, en favorisant la prévention, l'éducation et le bien-être émotionnel. Soit succinct dans tes réponses.""",
             input=text,
-            max_outpu_tokens=100
+            max_output_tokens=100
             )
         
         api_call_duration = time.time() - api_call_start
