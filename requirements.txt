@@ -11,7 +11,7 @@ torch==2.6.0+cu124
 torchaudio==2.6.0+cu124
 librosa==0.11.0
 soundfile==0.13.1
-#pyngrok
+pyngrok
 git+https://github.com/beethogedeon/deep-translator
 git+https://github.com/beethogedeon/OpenVoice
 openai-whisper==20250625
