@@ -37,7 +37,10 @@ logger.addHandler(file_handler)
 logger.addHandler(console_handler)
 
 
-from transformers import VitsModel, AutoTokenizer
+from transformers import VitsModel, AutoTokenizer, set_seed
+
+
+set_seed(555)
 
 logger.info("=" * 80)
 logger.info("INITIALISATION DES MODÈLES TTS")
@@ -47,7 +50,7 @@ logger.info("=" * 80)
 logger.info("Chargement du modèle TTS Fongbe...")
 fon_start = time.time()
 try:
-    fon_tts = VitsModel.from_pretrained("facebook/mms-tts-fon")
+    fon_tts = VitsModel.from_pretrained("facebook/mms-tts-fon", device_map="auto", dtype=torch.float16)
     fon_tokenizer = AutoTokenizer.from_pretrained("facebook/mms-tts-fon")
     fon_duration = time.time() - fon_start
     logger.info(f"✓ Modèle TTS Fongbe chargé avec succès en {fon_duration:.2f}s")
@@ -59,7 +62,7 @@ except Exception as e:
 logger.info("Chargement du modèle TTS Yoruba...")
 yor_start = time.time()
 try:
-    yor_tts = VitsModel.from_pretrained("facebook/mms-tts-yor")
+    yor_tts = VitsModel.from_pretrained("facebook/mms-tts-yor", device_map="auto", dtype=torch.float16)
     yor_tokenizer = AutoTokenizer.from_pretrained("facebook/mms-tts-yor")
     yor_duration = time.time() - yor_start
     logger.info(f"✓ Modèle TTS Yoruba chargé avec succès en {yor_duration:.2f}s")
@@ -207,7 +210,7 @@ def generate_speech(text: str, lang: str, input_audio_path: str, output_audio_pa
             token_start = time.time()
             logger.info("Tokenization du texte...")
             logger.info(text)
-            inputs = fon_tokenizer(text, return_tensors="pt")
+            inputs = fon_tokenizer(text, return_tensors="pt").to(fon_tts.device)
             sampling_rate = fon_tts.config.sampling_rate
             token_duration = time.time() - token_start
             logger.info(f"✓ Tokenization terminée en {token_duration:.2f}s (sample rate: {sampling_rate}Hz)")
@@ -266,7 +269,7 @@ def generate_speech(text: str, lang: str, input_audio_path: str, output_audio_pa
             # Tokenization
             token_start = time.time()
             logger.info("Tokenization du texte...")
-            inputs = yor_tokenizer(text, return_tensors="pt")
+            inputs = yor_tokenizer(text, return_tensors="pt").to(yor_tts.device)
             sampling_rate = yor_tts.config.sampling_rate
             token_duration = time.time() - token_start
             logger.info(f"✓ Tokenization terminée en {token_duration:.2f}s (sample rate: {sampling_rate}Hz)")
