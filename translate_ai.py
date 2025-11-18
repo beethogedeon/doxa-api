@@ -88,7 +88,7 @@ def ask_ai(text: str):
         logger.info("Appel de l'API OpenAI en cours...")
         api_call_start = time.time()
         
-        completion = client.chat.completions.create(
+        completion = client.responses.create(
             model="gpt-4.1-mini",
             #reasoning_effort= "none",
             #verbosity = "low",
