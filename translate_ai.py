@@ -108,7 +108,7 @@ def ask_ai(text: str):
         # Statistiques de la réponse
         logger.info(f"Modèle utilisé: {completion.model}")
         if hasattr(completion, 'usage'):
-            logger.info(f"Tokens utilisés: {completion.usage.total_tokens} (prompt: {completion.usage.prompt_tokens}, completion: {completion.usage.completion_tokens})")
+            logger.info(f"Tokens utilisés: {completion.usage.total_tokens} (prompt: {completion.usage.input_tokens}, completion: {completion.usage.output_tokens})")
         
         total_duration = time.time() - start_time
         logger.info(f"Réponse de l'IA: {response_preview}")
