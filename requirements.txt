@@ -17,3 +17,5 @@ git+https://github.com/beethogedeon/OpenVoice
 openai-whisper==20250625
 logging
 uvicorn
+pyannote.audio
+tqdm
