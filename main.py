@@ -15,6 +15,9 @@ import logging
 import uvicorn
 import time
 from datetime import datetime
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Configuration du logging avec rotation de fichiers
 from logging.handlers import RotatingFileHandler
