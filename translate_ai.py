@@ -102,7 +102,7 @@ def ask_ai(text: str):
         api_call_duration = time.time() - api_call_start
         logger.info(f"✓ Réponse de l'API reçue en {api_call_duration:.2f}s")
         
-        response_content = completion.choices[0].message.content
+        response_content = completion.output_text
         response_preview = response_content[:100] + "..." if len(response_content) > 100 else response_content
         
         # Statistiques de la réponse
